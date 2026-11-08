@@ -1,0 +1,79 @@
+// 个人博客系统数据模型
+// 注意：SQLite 不支持 enum，status 用 String，取值约束在 lib/validation.ts
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
+model Post {
+  id      String  @id @default(cuid())
+  title   String
+  slug    String  @unique
+  summary String?
+  content String
+  coverUrl String?
+
+  status      String    @default("DRAFT")
+  publishedAt DateTime?
+  views       Int       @default(0)
+  readingMinutes Int    @default(1)
+
+  previewTokenHash      String?
+  previewTokenExpiresAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  viewLogs PostViewLog[]
+
+  @@index([status, deletedAt, publishedAt])
+  @@index([deletedAt, updatedAt])
+  @@index([deletedAt])
+}
+
+model PostViewLog {
+  id        String   @id @default(cuid())
+  postId    String
+  ipHash    String
+  bucket    Int
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, ipHash, bucket])
+  @@index([postId, createdAt])
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  ip        String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([ip, createdAt])
+}

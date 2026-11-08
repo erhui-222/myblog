@@ -1,0 +1,8 @@
+{
+	email you@example.com
+}
+
+blog.example.com {
+	encode gzip zstd
+	reverse_proxy app:3000
+}
