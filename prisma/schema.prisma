@@ -1,13 +1,18 @@
 // 个人博客系统数据模型
-// 注意：SQLite 不支持 enum，status 用 String，取值约束在 lib/validation.ts
+// 数据库：Postgres（本地 Docker / Vercel Marketplace 的 Neon 集成）
+// status 仍用 String 而非 enum，取值约束在 lib/validation.ts
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // rhel-openssl-3.0.x 是 Vercel 函数运行时的目标平台，缺少会导致运行期找不到引擎
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider = "postgresql"
+  // 运行时用池化连接（Serverless 下必须），迁移/DDL 用直连
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 model AdminUser {

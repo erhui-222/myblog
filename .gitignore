@@ -1,5 +1,6 @@
 node_modules/
 .next/
+.next-old-*/
 out/
 build/
 .DS_Store
@@ -19,3 +20,6 @@ test-results/
 playwright-report/
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# Vercel CLI 本地链接信息
+.vercel

@@ -9,18 +9,24 @@
 
 ## 技术栈
 
-Next.js 15（App Router / SSR）+ TypeScript + Tailwind CSS 4 + Prisma 6 + SQLite
+Next.js 15（App Router / SSR）+ TypeScript + Tailwind CSS 4 + Prisma 6 + Postgres
+生产部署在 Vercel，图片存 Vercel Blob；也可用 Docker 自托管。
 
 ## 本地启动
 
+需要一个 Postgres。最简单的方式是用仓库自带的 compose 文件起一个：
+
 ```bash
+docker compose -f docker-compose.dev.yml up -d   # Postgres 监听 5433
 npm install
-cp .env.example .env        # 修改 ADMIN_PASSWORD 等
+cp .env.example .env        # 本地把 DATABASE_URL 指向 localhost:5433
 npx prisma migrate dev      # 建库建表
 npm run dev                 # http://localhost:3000
 ```
 
 管理员账号在服务启动时按 `.env` 中的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 自动创建；改密码 = 改环境变量后重启。
+
+封面图走 Vercel Blob，本地开发需要先 `npx vercel link && npx vercel env pull .env.local` 拿到 `BLOB_READ_WRITE_TOKEN`；不传图不影响其他功能。
 
 | 地址 | 说明 |
 | --- | --- |
@@ -42,14 +48,24 @@ npx prisma studio   # 看数据
 
 ## 部署
 
+**Vercel（推荐）**
+
+1. Vercel 导入仓库，框架选 Next.js（构建命令无需改，`build` 已含 `prisma generate`）
+2. Storage 里创建 Neon Postgres，自动注入 `DATABASE_URL`（池化）与 `DATABASE_URL_UNPOOLED`（直连）
+3. Storage 里创建 Blob store，**access 选 Public**，勾选 Development 环境
+4. 配置 `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `IP_SALT` / `CRON_SECRET` / `SITE_URL`
+5. 首次部署前在本地执行 `DATABASE_URL="<直连串>" npx prisma migrate deploy` 建表
+6. 回收站清理由 `vercel.json` 的 cron 每天 03:00 调用 `/api/cron/purge`
+
+**Docker 自托管（备选）**
+
 ```bash
-cp .env.example .env        # 填 SITE_URL / 强密码 / IP_SALT
+cp .env.example .env        # 填 SITE_URL / POSTGRES_PASSWORD / 强密码 / IP_SALT
 docker compose up -d --build
 ```
 
-- `app` 容器跑 Next.js（standalone），`caddy` 容器负责 HTTPS 与反向代理，改 `Caddyfile` 里的域名即可。
-- 数据落在宿主机 `./data/db`（SQLite）与 `./data/uploads`（封面图），容器重建不丢数据。
-- 备份：`scripts/backup.sh` 用 `VACUUM INTO` 生成一致快照，保留 7 份。crontab 示例写在脚本头部。
+- `app` 跑 Next.js，`db` 是 Postgres，`caddy` 负责 HTTPS 与反向代理，改 `Caddyfile` 里的域名即可。
+- 数据落在 `pgdata` 卷，容器重建不丢。备份用 `pg_dump`，`scripts/backup.sh` 是 SQLite 版本的，切库后需改写。
 
 ## 目录
 

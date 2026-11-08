@@ -10,6 +10,8 @@ FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# 只有自托管（Docker）才需要 standalone 产物，Vercel 构建不设这个变量
+ENV BUILD_TARGET=docker
 RUN npx prisma generate && npm run build
 
 FROM base AS runner
@@ -26,8 +28,6 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-
-RUN mkdir -p /app/data /app/public/uploads
 
 EXPOSE 3000
 

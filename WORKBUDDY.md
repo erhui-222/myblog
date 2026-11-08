@@ -21,9 +21,12 @@
 
 ## 3. 当前状态
 
-> 截至 2026-11-08：**文档阶段完成，代码尚未初始化**。仓库里只有 `memory-bank/` 两份文档。
+> 截至 2026-11-08：**功能已实现，已切换为 Postgres，Vercel 部署配置就绪**。
 
-下一个动作是 **M0**（见第 12 节）。执行 M0 前不要假设 `package.json`、`prisma/`、`app/` 存在。
+- 用户端与后台全部可用，19 个单测通过，关键链路已实测（登录 / 发文 / 预览 / 阅读去重 / 回收站）
+- 数据库已从 SQLite 切到 Postgres，迁移在 `prisma/migrations/`
+- 部署目标为 Vercel，详见 `memory-bank/DEPLOY_VERCEL.md`
+- Docker 自托管路径保留但需注意：它与 Vercel 共用 Postgres 版本，`scripts/backup.sh` 仍是 SQLite 写法，自托管时要改 `pg_dump`
 
 ## 4. 技术栈（已定，不要替换）
 
@@ -33,30 +36,31 @@
 | 语言 | TypeScript（strict） | 不用 `any`，不关 `strictNullChecks` |
 | UI | React 19 + Tailwind CSS 4 | 只用 Tailwind 类，不写 `style={{}}` |
 | 交互组件 | Radix UI primitives（按需） | 只取 Dialog / Toast / Switch 等，**不要**全量初始化 shadcn |
-| ORM | Prisma 6 | SQLite（`provider = "sqlite"`） |
-| 数据库 | SQLite + WAL | 备份用 `VACUUM INTO` |
+| ORM | Prisma 6 | `provider = "postgresql"`，`binaryTargets` 含 `rhel-openssl-3.0.x`（Vercel 运行时） |
+| 数据库 | Postgres | 生产 = Vercel Marketplace 的 Neon；本地 = docker-compose.dev.yml |
+| 图片存储 | Vercel Blob | **不能写本地磁盘**，Serverless 文件系统只读且不持久 |
 | 认证 | 自建 Session 表 + HttpOnly Cookie | 不用 NextAuth / JWT |
 | 密码 | bcrypt（cost 12） | |
 | Markdown | unified 管线（remark-gfm / rehype-slug / rehype-pretty-code + shiki / rehype-sanitize） | 服务端渲染成 HTML |
 | 编辑器 | 自研 textarea + 分栏预览 | 不引 Monaco / CodeMirror |
 | 图表 | 纯 SVG 手写 | 只有一张环形图，不引 ECharts |
-| 测试 | Vitest（纯函数）+ Playwright（主链路） | |
-| 部署 | Docker Compose（app + Caddy）+ 单台 VPS | |
+| 测试 | Vitest（纯函数） | Playwright 未接入 |
+| 部署 | **Vercel（主）** + Docker Compose（备选自托管） | 详见 `memory-bank/DEPLOY_VERCEL.md` |
 
 **新增任何依赖前先问一句：现有栈能不能做？** 能就不加。加要说明理由并记进 `TECH_DESIGN.md` 的选型表。
 
 ## 5. 常用命令
 
 ```bash
+docker compose -f docker-compose.dev.yml up -d   # 本地 Postgres（端口 5433）
 npm run dev              # 本地开发
-npm run build            # 生产构建
-npm run lint             # ESLint
+npm run build            # 生产构建（含 prisma generate）
 npm run test             # Vitest
-npm run test:e2e         # Playwright
 npx prisma migrate dev   # 改完 schema 后建迁移
 npx prisma generate      # 生成 client
 npx prisma studio        # 看数据
-npx prisma migrate deploy   # 生产环境应用迁移（容器启动时自动跑）
+npx prisma migrate deploy   # 生产应用迁移，必须用 DATABASE_URL_UNPOOLED 直连串
+npx vercel env pull .env.local   # 拉取 Blob 等 Vercel 环境变量
 ```
 
 ## 6. 目录职责
@@ -68,7 +72,10 @@ components/     site(前台) / article(正文) / about / admin(后台) / ui(通�
 lib/            纯函数与横切能力：db auth slug excerpt markdown views env
   services/     业务规则与数据库访问，页面和 API 共用
 prisma/         schema + migrations
-scripts/        backup.sh seed.ts
+scripts/        backup.sh（SQLite 版，切 Postgres 后需改写为 pg_dump）
+docker-compose.dev.yml   本地 Postgres
+docker-compose.yml      自托管：app + db + caddy
+vercel.json     cron 配置
 ```
 
 ## 7. 架构铁律
@@ -85,13 +92,17 @@ scripts/        backup.sh seed.ts
 
 ## 8. 数据层约定与已知坑
 
-这三条是真踩过会浪费半天的问题，实现时直接照做。
+这几条是真踩过会浪费时间的问题，实现时直接照做。
 
 | 坑 | 正确做法 |
 | --- | --- |
-| SQLite 不支持 `enum` | `status` 用 `String`，取值 `'DRAFT' \| 'PUBLISHED'`，约束放 zod（`lib/validation/post.ts`）。迁 Postgres 时再转原生 enum |
-| SQLite 不支持 `mode: 'insensitive'` | 搜索直接 `contains`。SQLite 的 `LIKE` 对 ASCII 本就忽略大小写，中文无大小写概念 |
-| 备份不能直接 `cp` 数据库文件 | WAL 模式下会拷到不一致快照，必须 `sqlite3 db "VACUUM INTO '...'"` |
+| Serverless 下连接数会被打爆 | 运行时连池化地址（`DATABASE_URL`），并追加 `pgbouncer=true&connection_limit=1`；不要用直连串跑应用 |
+| 迁移走连接池会挂住 | DDL 必须用直连串（`DATABASE_URL_UNPOOLED`），否则 `migrate deploy` 一直不返回 |
+| 没有持久磁盘 | 任何 `fs.writeFile` 到 `public/` 或 `data/` 在 Vercel 上都无效。图片一律走 `@vercel/blob` 的 `put()` |
+| 函数请求体上限 4.5MB | `UPLOAD_MAX_MB` 必须 ≤ 4，否则超限请求被平台直接拒绝（413），我们的校验代码根本不会执行 |
+| Blob store 必须是 public | 选 private 后返回的 URL 需要签名才能访问，封面会裂开 |
+| Prisma 缺引擎报错 | `binaryTargets` 必须含 `rhel-openssl-3.0.x`，否则 Vercel 运行期提示找不到 query engine |
+| `purgeExpiredTrash` 无调用点 | 由 `/api/cron/purge` + `vercel.json` 的 cron 触发，不要再写成「已有定时清理」 |
 
 **阅读量去重**用时间桶，不要写定时任务或范围查询：
 

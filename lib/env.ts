@@ -6,7 +6,10 @@ const schema = z.object({
   ADMIN_USERNAME: z.string().min(1, "ADMIN_USERNAME 未配置"),
   ADMIN_PASSWORD: z.string().min(8, "ADMIN_PASSWORD 至少 8 位"),
   IP_SALT: z.string().min(8, "IP_SALT 至少 8 位"),
-  UPLOAD_MAX_MB: z.coerce.number().int().positive().default(5),
+  // Vercel 函数请求体上限 4.5MB，这里必须低于它，否则超限请求会被平台直接拒绝（413）
+  UPLOAD_MAX_MB: z.coerce.number().int().positive().max(4).default(4),
+  // 保护 /api/cron/* 端点；Vercel Cron 触发时会带上 Authorization: Bearer <CRON_SECRET>
+  CRON_SECRET: z.string().optional(),
 });
 
 type Env = z.infer<typeof schema>;
@@ -48,5 +51,8 @@ export const env = {
   },
   get uploadMaxMb() {
     return get().UPLOAD_MAX_MB;
+  },
+  get cronSecret() {
+    return process.env.CRON_SECRET ?? get().CRON_SECRET ?? "";
   },
 };
